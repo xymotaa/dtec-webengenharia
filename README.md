@@ -80,55 +80,69 @@ Acesse [http://localhost:4000](http://localhost:4000).
 
 ## Testando a API de sensores
 
-O endpoint recebe pulsos de sensores autenticados por `machine_identifier`.
+Fluxo completo em **2 terminais** a partir de uma instalação limpa.
 
-### Cadastrar um nó (via IEx)
+### Terminal 1 — Servidor
+
+```bash
+mix setup        # cria o banco e roda as migrações
+mix phx.server
+```
+
+Acesse [http://localhost:4000/dashboard](http://localhost:4000/dashboard) — o painel aparece vazio por enquanto.
+
+> No Windows com Git Bash, use `iex.bat -S mix phx.server` para rodar com console interativo.
+
+---
+
+### Terminal 2 — Cadastrar 50 nós (apenas uma vez)
+
+```bash
+iex.bat -S mix
+```
+
+Cole o bloco abaixo no console IEx e pressione Enter:
 
 ```elixir
-# No terminal interativo:
-iex.bat -S mix
-
-WCore.Telemetry.create_node(%{
-  machine_identifier: "MACH-001",
-  location: "Setor A"
-})
-```
-
-### Enviar um pulso (curl)
-
-```bash
-curl -s -X POST http://localhost:4000/api/nodes/MACH-001/pulse \
-  -H "Content-Type: application/json" \
-  -d '{"status": "ok", "payload": {"temp": 72.4, "rpm": 1200}}'
-```
-
-**Status válidos:** `ok` | `warning` | `critical`
-
-### Simular 10 máquinas com status aleatórios (Bash)
-
-```bash
-# Cadastra 10 nós via IEx primeiro:
-iex.bat -S mix <<'EOF'
-for i <- 1..10 do
+for i <- 1..50 do
   WCore.Telemetry.create_node(%{
     machine_identifier: "MACH-#{String.pad_leading("#{i}", 3, "0")}",
-    location: "Setor #{div(i - 1, 3) + 1}"
+    location: "Setor #{div(i - 1, 10) + 1}"
   })
 end
-EOF
-
-# Dispara 50 pulsos aleatórios em paralelo:
-statuses=("ok" "ok" "ok" "warning" "critical")
-for i in $(seq 1 50); do
-  machine=$(printf "MACH-%03d" $((RANDOM % 10 + 1)))
-  status=${statuses[$RANDOM % 5]}
-  curl -s -X POST "http://localhost:4000/api/nodes/$machine/pulse" \
-    -H "Content-Type: application/json" \
-    -d "{\"status\": \"$status\", \"payload\": {\"seq\": $i}}" &
-done
-wait
-echo "Pulsos enviados. Veja o dashboard em http://localhost:4000/dashboard"
 ```
+
+Aguarde as 50 confirmações `{:ok, %Node{...}}` e saia com `Ctrl+C Ctrl+C`.
+
+---
+
+### Terminal 2 — Loop infinito de pulsos
+
+Cole e execute no mesmo terminal após sair do IEx:
+
+```bash
+STATUSES=("ok" "ok" "ok" "ok" "warning" "warning" "critical")
+SEQ=0
+while true; do
+  SEQ=$((SEQ + 1))
+  for i in $(seq 1 50); do
+    machine=$(printf "MACH-%03d" "$i")
+    status=${STATUSES[$RANDOM % ${#STATUSES[@]}]}
+    curl -s -o /dev/null -X POST "http://localhost:4000/api/nodes/$machine/pulse" \
+      -H "Content-Type: application/json" \
+      -d "{\"status\": \"$status\", \"payload\": {\"seq\": $SEQ}}" &
+  done
+  wait
+  echo "Round $SEQ — 50 pulsos enviados  [$(date '+%H:%M:%S')]"
+  sleep 1
+done
+```
+
+Acompanhe o dashboard ao vivo — os cards atualizam em tempo real sem reload de página.
+
+**Ctrl+C** para parar o loop.
+
+**Status válidos:** `ok` | `warning` | `critical`
 
 ---
 
