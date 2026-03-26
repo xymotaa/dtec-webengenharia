@@ -47,7 +47,7 @@ defmodule WCore.Telemetry.Cache do
   def get(node_id) do
     case :ets.lookup(@table, node_id) do
       [{^node_id, status, count, payload, ts}] ->
-        %{node_id: node_id, status: status, event_count: count, last_payload: payload, timestamp: ts}
+        %{node_id: node_id, status: status, event_count: count, last_payload: payload, last_seen_at: ts}
 
       [] ->
         nil
@@ -58,7 +58,7 @@ defmodule WCore.Telemetry.Cache do
   def all do
     :ets.tab2list(@table)
     |> Enum.map(fn {node_id, status, count, payload, ts} ->
-      %{node_id: node_id, status: status, event_count: count, last_payload: payload, timestamp: ts}
+      %{node_id: node_id, status: status, event_count: count, last_payload: payload, last_seen_at: ts}
     end)
   end
 

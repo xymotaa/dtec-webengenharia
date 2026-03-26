@@ -57,9 +57,18 @@ defmodule WCoreWeb.Router do
   scope "/", WCoreWeb do
     pipe_through [:browser, :require_authenticated_user]
 
+    live "/dashboard", DashboardLive
+
     get "/users/settings", UserSettingsController, :edit
     put "/users/settings", UserSettingsController, :update
     get "/users/settings/confirm-email/:token", UserSettingsController, :confirm_email
+  end
+
+  # API para ingestão de pulsos dos sensores (Edge Devices)
+  scope "/api", WCoreWeb do
+    pipe_through :api
+
+    post "/nodes/:machine_identifier/pulse", SensorController, :pulse
   end
 
   scope "/", WCoreWeb do
