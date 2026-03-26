@@ -1,0 +1,6 @@
+#!/bin/sh
+# Roda as migrações pendentes dentro do OTP release (sem Mix).
+# Chamado antes de iniciar o servidor no primeiro deploy.
+set -eu
+
+"$(dirname "$0")/w_core" eval "WCore.Release.migrate()"

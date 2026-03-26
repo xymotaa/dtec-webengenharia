@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    ports:
+      - "4000:4000"
+    volumes:
+      # Persiste o SQLite fora do container — dados sobrevivem a rebuilds e restarts
+      - sqlite_data:/data
+    environment:
+      DATABASE_PATH: /data/w_core_prod.db
+      SECRET_KEY_BASE: "TROQUE_ANTES_DE_USAR_EM_PRODUCAO_mix_phx_gen_secret"
+      PHX_HOST: localhost
+      PHX_SERVER: "true"
+      PORT: "4000"
+
+volumes:
+  sqlite_data:

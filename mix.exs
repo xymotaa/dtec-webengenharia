@@ -10,8 +10,19 @@ defmodule WCore.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      releases: releases(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader]
+    ]
+  end
+
+  def releases do
+    [
+      w_core: [
+        include_executables_for: [:unix],
+        # Copia os scripts de rel/overlays para o release compilado
+        overlays: "rel/overlays"
+      ]
     ]
   end
 

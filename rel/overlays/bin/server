@@ -1,0 +1,7 @@
+#!/bin/sh
+# Inicia o servidor Phoenix via OTP release.
+# PHX_SERVER=true ativa o listener HTTP (configurado em runtime.exs).
+set -eu
+
+export PHX_SERVER=true
+exec "$(dirname "$0")/w_core" start

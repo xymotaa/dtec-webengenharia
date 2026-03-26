@@ -1,0 +1,41 @@
+# Dependências e artefatos de build — não devem ir para a imagem
+_build/
+deps/
+node_modules/
+
+# Banco de dados local de desenvolvimento e teste
+*.db
+*.db-shm
+*.db-wal
+priv/repo/dev.db*
+priv/repo/test.db*
+
+# Logs
+*.log
+log/
+
+# Cobertura de testes
+cover/
+
+# Arquivos temporários do sistema operacional
+.DS_Store
+Thumbs.db
+
+# Configuração de IDE e editores
+.elixir_ls/
+.vscode/
+.idea/
+
+# Assets compilados (são gerados no builder stage)
+priv/static/assets/
+
+# Documentação interna
+docs/
+
+# Git
+.git/
+.gitignore
+
+# Variáveis de ambiente locais (NUNCA deve entrar na imagem)
+.env
+.env.*

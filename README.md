@@ -1,118 +1,235 @@
-# WCore
+# W-Core — Motor de Estado em Tempo Real
 
-To start your Phoenix server:
+Motor de estado para monitoramento de sensores industriais da **Planta 42**, construído com Elixir + Phoenix LiveView + OTP + ETS + SQLite.
 
-* Run `mix setup` to install and setup dependencies
-* Start Phoenix endpoint with `mix phx.server` or inside IEx with `iex -S mix phx.server`
-
-Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
-
-Ready to run in production? Please [check our deployment guides](https://hexdocs.pm/phoenix/deployment.html).
-
-## Learn more
-
-* Official website: https://www.phoenixframework.org/
-* Guides: https://hexdocs.pm/phoenix/overview.html
-* Docs: https://hexdocs.pm/phoenix
-* Forum: https://elixirforum.com/c/phoenix-forum
-* Source: https://github.com/phoenixframework/phoenix
-
-# Desafio Técnico Elite: Motor de Estado em Tempo Real (W-Core)
-
-Bem-vindo ao desafio técnico para Engenharia de Software na **Web-Engenharia**. 
-
-Nós construímos sistemas de missão crítica, arquiteturas cognitivas SOTA e infraestruturas resilientes puramente na BEAM. Este teste foi desenhado para avaliar não apenas sua capacidade de escrever código, mas como você toma decisões arquiteturais, gerencia estado concorrente e justifica suas escolhas.
+O sistema absorve picos de tráfego de milhares de sensores em memória (ETS), sincroniza com SQLite de forma assíncrona (Write-Behind) e exibe o estado das máquinas em tempo real via LiveView + PubSub — tudo sem perder um único evento.
 
 ---
 
-## O Briefing: O Incidente na Planta 42
+## Arquitetura
 
-**Contexto da Missão:**
-A Web-Engenharia foi acionada em caráter de urgência por um de seus clientes industriais. A "Planta 42", um complexo de manufatura operando 24/7, está à beira de um apagão logístico. Eles possuem milhares de sensores (Edge Devices) monitorando a saúde do maquinário.
+```
+Sensores (HTTP POST)
+       │
+       ▼
+WCoreWeb.SensorController          ← valida a requisição
+       │
+       ▼ cast (async)
+WCore.Telemetry.IngestServer       ← GenServer, fila de ingestão
+       │
+       ├─► WCore.Telemetry.Cache   ← ETS :set, update_counter atômico
+       │         (hot state)
+       │
+       └─► Phoenix.PubSub          ← broadcast só em mudança de status
+                 │
+                 ▼
+       WCoreWeb.DashboardLive      ← LiveView, O(1) update via map
 
-**O Problema:**
-O sistema legado deles — um monólito engessado — não está aguentando a carga. Os sensores enviam um "pulso" (heartbeat) a cada poucos segundos contendo métricas vitais. O banco de dados relacional tradicional sofre *lock* constante de escrita, os painéis da sala de operações apresentam um atraso de minutos (inaceitável para missão crítica), e falsos positivos estão paralisando a produção.
+WCore.Telemetry.WriteBehindWorker  ← GenServer, flush ETS→SQLite a cada 5s
+       │
+       ▼
+    SQLite (WCore.Repo)            ← fonte de verdade persistente
+```
 
-**A Sua Missão:**
-Você foi alocado na "Força-Tarefa W-Core". Sua missão é substituir o gargalo construindo um motor de estado em tempo real. O sistema rodará localmente no servidor da planta (Edge Computing), usando um banco de dados embutido, e deve ser imune a picos de tráfego. 
-
-A diretriz da operação é clara: *"Não podemos perder eventos, a tela deve piscar em tempo real na falha de uma máquina, e o histórico deve estar a salvo caso o servidor reinicie."*
-
----
-
-## Stack e Restrições
-
-* **Linguagem & Framework:** Elixir + Phoenix LiveView.
-* **Banco de Dados:** SQLite local (estritamente proibido o uso de dependências externas como Postgres ou Redis).
-* **Autenticação:** Gerada exclusivamente via `phx.gen.auth`.
-* **Estado & Cache:** Uso obrigatório de ETS e processos OTP (GenServer/Supervisor) para o fluxo de dados.
-* **Design System:** Componentes HEEx puros, criados por você (nada de bibliotecas pesadas de UI de terceiros).
-* **Infraestrutura:** Uma release Elixir pura, rodando sobre um Dockerfile simples.
-
----
-
-## A Regra de Ouro: A Cultura da Documentação
-
-Para nós, código que funciona mas não pode ser explicado é código legado. 
-**A cada passo de evolução concluído, você deve criar um arquivo Markdown na pasta `/docs/drafts/`** (ex: `/docs/drafts/step-1-foundation.md`). 
-
-Cada rascunho deve conter:
-1. O que foi implementado.
-2. O que mudou na arquitetura (diagramas em texto ou Mermaid são bem-vindos).
-3. Os *trade-offs* e o porquê das decisões (especialmente envolvendo concorrência e o banco).
+**Supervisão OTP** (`:rest_for_one` — ordem importa):
+```
+WCore.Telemetry.Supervisor
+  ├── Cache            (cria a tabela ETS primeiro)
+  ├── IngestServer     (depende do ETS existir)
+  └── WriteBehindWorker
+```
 
 ---
 
-## Blueprint de Dados (Modelagem)
+## Pré-requisitos
 
-A arquitetura exige a divisão do estado em duas camadas para evitar o gargalo de I/O:
+| Ferramenta | Versão mínima |
+|---|---|
+| Erlang/OTP | 27 |
+| Elixir | 1.18 |
+| Docker | 24 (opcional, para deploy) |
 
-### 1. Camada de Persistência (SQLite / Ecto)
-O banco atua como a fonte de verdade de longo prazo.
-
-* **Contexto `Accounts`:** Tabela `users` (Operadores da Planta 42, gerado pelo phx.gen.auth).
-* **Contexto `Telemetry`:** * Tabela `nodes` (Cadastro estático dos sensores: `id`, `machine_identifier`, `location`).
-  * Tabela `node_metrics` (Consolidado com o último estado conhecido: `node_id`, `status`, `total_events_processed`, `last_payload`, `last_seen_at`).
-
-### 2. Camada Transacional em Memória (Erlang ETS)
-Onde o "tsunami" de eventos é absorvido em tempo real.
-
-* **Tabela ETS:** `:w_core_telemetry_cache`
-* **Estrutura sugerida:** `{node_id, status, event_count, last_payload, timestamp}`
-
-*O Desafio Arquitetural:* Eventos chegam -> GenServer atualiza o ETS imediatamente -> Um Worker assíncrono varre o ETS a cada `X` segundos/eventos e faz um `upsert` em lote no SQLite (*Write-Behind*).
+**Windows:** Elixir em `C:\Program Files\Elixir\bin` e Erlang em `C:\Program Files\Erlang OTP\bin`. Adicione ambos ao PATH antes de usar o terminal.
 
 ---
 
-## Etapas de Evolução do Projeto
+## Rodando localmente
 
-### Passo 1: O Perímetro de Segurança (Fundação e Autenticação)
-* **Missão:** Iniciar a aplicação, configurar o SQLite, gerar a autenticação e desenhar os limites do domínio (`Telemetry`) isolado do web.
-* **Entregável:** `/docs/drafts/step-1-foundation.md`
+```bash
+# 1. Instalar dependências e configurar o banco
+mix setup
 
-### Passo 2: O Coração da Usina (Erlang OTP & ETS)
-* **Missão:** Construir o sistema de ingestão. Usar `GenServer` para receber o tráfego, gravar no ETS para performance extrema e implementar o mecanismo *Write-Behind* para o SQLite.
-* **Entregável:** `/docs/drafts/step-2-otp-ets.md` (Defenda o tipo de tabela ETS e a estratégia de supervisão).
+# 2. Iniciar o servidor
+mix phx.server
+```
 
-### Passo 3: A Sala de Controle (Design System e LiveView)
-* **Missão:** Criar o Dashboard para usuários autenticados usando LiveView e componentes HEEx limpos. A interface deve ler os dados quentes do ETS e reagir instantaneamente via `Phoenix.PubSub` quando novos pulsos alterarem o status das máquinas.
-* **Entregável:** `/docs/drafts/step-3-liveview-ds.md` (Explique como evitou gargalos no PubSub).
+Acesse [http://localhost:4000](http://localhost:4000).
 
-### Passo 4: Simulação de Caos (Testes Rigorosos)
-* **Missão:** Provar a resiliência. Além de testes unitários, crie um teste de integração que injete **10.000 eventos concorrentes**. Prove via asserções que o ETS não perdeu a conta, que não houve condição de corrida e que o SQLite sincronizou o estado corretamente.
-* **Entregável:** `/docs/drafts/step-4-tests.md`
-
-### Passo 5: O Empacotamento para o Edge (Infraestrutura)
-* **Missão:** Criar o `Dockerfile` gerando uma `mix release` otimizada, garantindo a persistência do volume do banco. 
-* **Entregável:** `/docs/drafts/step-5-infra-arch.md` (Inclua um diagrama arquitetural documentando o fluxo final).
+> No Windows com Git Bash, o comando `iex` conflita com `Invoke-Expression` do PowerShell.
+> Use `iex.bat -S mix phx.server` para rodar com console interativo.
 
 ---
 
-## O que vamos avaliar?
+## Criando um usuário
 
-1. **Maturidade OTP:** O uso correto de GenServers, Supervisors e controle de concorrência.
-2. **Domínio do ETS:** Compreensão de performance no Erlang (ex: `ets:update_counter`).
-3. **Qualidade da Comunicação:** Seus rascunhos revelam clareza técnica.
-4. **Separação de Preocupações (CQRS base):** A divisão clara entre o fluxo de escrita orientado a eventos e o fluxo de leitura reativo.
+1. Acesse [http://localhost:4000/users/register](http://localhost:4000/users/register)
+2. Crie uma conta
+3. Acesse **Sala de Controle** na navbar
 
-**Boa sorte. Estamos ansiosos para ver sua engenharia em ação.**
+---
+
+## Testando a API de sensores
+
+O endpoint recebe pulsos de sensores autenticados por `machine_identifier`.
+
+### Cadastrar um nó (via IEx)
+
+```elixir
+# No terminal interativo:
+iex.bat -S mix
+
+WCore.Telemetry.create_node(%{
+  machine_identifier: "MACH-001",
+  location: "Setor A"
+})
+```
+
+### Enviar um pulso (curl)
+
+```bash
+curl -s -X POST http://localhost:4000/api/nodes/MACH-001/pulse \
+  -H "Content-Type: application/json" \
+  -d '{"status": "ok", "payload": {"temp": 72.4, "rpm": 1200}}'
+```
+
+**Status válidos:** `ok` | `warning` | `critical`
+
+### Simular 10 máquinas com status aleatórios (Bash)
+
+```bash
+# Cadastra 10 nós via IEx primeiro:
+iex.bat -S mix <<'EOF'
+for i <- 1..10 do
+  WCore.Telemetry.create_node(%{
+    machine_identifier: "MACH-#{String.pad_leading("#{i}", 3, "0")}",
+    location: "Setor #{div(i - 1, 3) + 1}"
+  })
+end
+EOF
+
+# Dispara 50 pulsos aleatórios em paralelo:
+statuses=("ok" "ok" "ok" "warning" "critical")
+for i in $(seq 1 50); do
+  machine=$(printf "MACH-%03d" $((RANDOM % 10 + 1)))
+  status=${statuses[$RANDOM % 5]}
+  curl -s -X POST "http://localhost:4000/api/nodes/$machine/pulse" \
+    -H "Content-Type: application/json" \
+    -d "{\"status\": \"$status\", \"payload\": {\"seq\": $i}}" &
+done
+wait
+echo "Pulsos enviados. Veja o dashboard em http://localhost:4000/dashboard"
+```
+
+---
+
+## Rodando os testes
+
+```bash
+# Suite completa (103 testes)
+mix test
+
+# Apenas testes unitários do cache ETS (async, rápidos)
+mix test test/w_core/telemetry/cache_test.exs
+
+# Teste de caos: 10.000 eventos concorrentes
+mix test test/w_core/telemetry_chaos_test.exs --trace
+```
+
+### O que os testes validam
+
+| Arquivo | Tipo | O que prova |
+|---|---|---|
+| `cache_test.exs` | Unitário (async) | `update_counter` atômico, sem race condition, 100 upserts sequenciais |
+| `telemetry_chaos_test.exs` | Integração (sync) | 10k eventos concorrentes → ETS conta exato → SQLite sincronizado |
+
+**Saída esperada:**
+```
+103 tests, 0 failures
+```
+
+---
+
+## Deploy com Docker
+
+### Build e execução
+
+```bash
+# Build da imagem (multi-stage: builder ~600MB → runner ~150MB)
+docker build -t w_core:latest .
+
+# Gerar uma SECRET_KEY_BASE segura
+openssl rand -base64 48
+
+# Rodar o container com volume persistente para o SQLite
+docker run -d \
+  --name w_core \
+  -p 4000:4000 \
+  -v w_core_data:/data \
+  -e DATABASE_PATH=/data/w_core_prod.db \
+  -e SECRET_KEY_BASE="<chave gerada acima>" \
+  -e PHX_HOST=localhost \
+  w_core:latest
+
+# Verificar logs
+docker logs -f w_core
+```
+
+### Com docker-compose
+
+```bash
+# Editar docker-compose.yml com uma SECRET_KEY_BASE real, depois:
+docker compose up --build
+```
+
+### Migrações
+
+As migrações rodam automaticamente ao iniciar o container. Para rodar manualmente:
+
+```bash
+docker exec w_core bin/migrate
+```
+
+### Variáveis de ambiente
+
+| Variável | Obrigatória | Descrição |
+|---|---|---|
+| `DATABASE_PATH` | Sim | Caminho do arquivo SQLite (ex: `/data/w_core_prod.db`) |
+| `SECRET_KEY_BASE` | Sim | Chave de 64+ chars para assinar cookies (`openssl rand -base64 48`) |
+| `PHX_HOST` | Não | Hostname da aplicação (padrão: `example.com`) |
+| `PORT` | Não | Porta HTTP (padrão: `4000`) |
+
+---
+
+## Documentação técnica
+
+Cada decisão arquitetural está documentada em `docs/drafts/`:
+
+| Arquivo | Conteúdo |
+|---|---|
+| [step-1-foundation.md](docs/drafts/step-1-foundation.md) | Fundação: Phoenix, SQLite, autenticação, modelagem |
+| [step-2-otp-ets.md](docs/drafts/step-2-otp-ets.md) | OTP: ETS, GenServers, Write-Behind pattern |
+| [step-3-liveview-ds.md](docs/drafts/step-3-liveview-ds.md) | LiveView: PubSub, componentes HEEx, design system |
+| [step-4-tests.md](docs/drafts/step-4-tests.md) | Testes: caos, concorrência, asserções de resiliência |
+| [step-5-infra-arch.md](docs/drafts/step-5-infra-arch.md) | Infraestrutura: Dockerfile, release OTP, diagrama |
+
+---
+
+## Stack
+
+- **Elixir 1.18** + **Erlang/OTP 27**
+- **Phoenix 1.8.5** + **LiveView 1.1**
+- **SQLite** via `ecto_sqlite3`
+- **ETS** para estado em memória
+- **Bandit** como servidor HTTP
+- **DaisyUI + Tailwind CSS** para o design system
+- **Docker** com build multi-estágio
