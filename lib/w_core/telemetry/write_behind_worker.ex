@@ -68,14 +68,20 @@ defmodule WCore.Telemetry.WriteBehindWorker do
       Logger.debug("[WriteBehindWorker] Sincronizando #{length(entries)} nó(s) com o SQLite...")
 
       Enum.each(entries, fn %{node_id: node_id, status: status, event_count: count,
-                               last_payload: payload, timestamp: ts} ->
-        TelemetryContext.upsert_node_metric(%{
-          node_id: node_id,
-          status: status,
-          total_events_processed: count,
-          last_payload: payload,
-          last_seen_at: ts
-        })
+                               last_payload: payload, last_seen_at: ts} ->
+        try do
+          TelemetryContext.upsert_node_metric(%{
+            node_id: node_id,
+            status: status,
+            total_events_processed: count,
+            last_payload: payload,
+            last_seen_at: ts
+          })
+        rescue
+          # Nó pode não existir no banco (ex: deletado ou entrada de teste órfã no ETS)
+          Ecto.ConstraintError ->
+            Logger.warning("[WriteBehindWorker] node_id=#{node_id} sem referência no banco, pulando.")
+        end
       end)
     end
   end

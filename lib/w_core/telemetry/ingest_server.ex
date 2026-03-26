@@ -40,6 +40,16 @@ defmodule WCore.Telemetry.IngestServer do
     GenServer.cast(__MODULE__, {:ingest, node_id, payload})
   end
 
+  @doc """
+  Drena a fila de mensagens do IngestServer (uso em testes).
+
+  Como `call` entra na mesma mailbox que os `cast`s e é processado em ordem
+  FIFO, este call só retorna após todos os casts anteriores serem processados.
+  """
+  def sync(timeout \\ 30_000) do
+    GenServer.call(__MODULE__, :sync, timeout)
+  end
+
   # ── Callbacks do GenServer ───────────────────────────────────────────────────
 
   @impl true
@@ -69,6 +79,11 @@ defmodule WCore.Telemetry.IngestServer do
   # Ignora eventos com payload mal-formado (sem campo "status")
   def handle_cast({:ingest, _node_id, _payload}, state) do
     {:noreply, state}
+  end
+
+  @impl true
+  def handle_call(:sync, _from, state) do
+    {:reply, :ok, state}
   end
 
   # ── Funções privadas ─────────────────────────────────────────────────────────
