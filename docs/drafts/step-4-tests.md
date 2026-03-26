@@ -4,7 +4,7 @@
 
 - `test/w_core/telemetry/cache_test.exs` — Testes unitários do módulo ETS (`Cache`)
 - `test/w_core/telemetry_chaos_test.exs` — Teste de integração com 10.000 eventos concorrentes
-- `IngestServer.sync/1` adicionado para sincronização determinística em testes
+- `IngestServer.sync/0` adicionado para sincronização determinística em testes (aceita timeout opcional)
 
 ## Estrutura dos Testes
 
@@ -44,7 +44,7 @@ Cobrem o módulo `Cache` em isolamento (sem DB, sem GenServer):
 
 ## Decisões Técnicas
 
-### Por que `IngestServer.sync/1` em vez de `Process.sleep`?
+### Por que `IngestServer.sync/0` em vez de `Process.sleep`?
 
 `Process.sleep` é não determinístico — em máquinas lentas ou sob carga, pode não ser suficiente. `sync/1` usa `GenServer.call`, que entra na mailbox **depois** de todos os casts anteriores e só retorna quando o GenServer o processa. É a garantia formal de que a fila foi drenada.
 
